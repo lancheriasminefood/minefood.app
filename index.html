@@ -127,9 +127,7 @@ a.btn{display:inline-block;text-decoration:none;text-align:center}
 .pf input{width:84px;border:1.5px solid var(--ln);background:var(--bg);border-radius:8px;padding:.3rem .6rem;min-height:34px;text-align:center}
 .pf input:focus{border-color:var(--pr);outline:0}
 </style>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -1399,13 +1397,15 @@ var QR=req('index');window.MFQR=function(t){var q=new QR(-1,0);q.addData(t);q.ma
 </script>
 <script>
 /* Minefood – dados, regras e utilitários.
-   Os dados ficam no localStorage do navegador (sem servidor). */
+   Com o Supabase configurado, os dados ficam online; sem ele, ficam só no localStorage deste navegador. */
 const ADMIN_EMAIL='admin@minefood.com',ADMIN_H='5a5ad199dd113371a7c07bf4b01a7db335ad4f6be6d8cc6aa2ec30cdd0d02e9d';
 const KEY='minefood_v2',PIX_CHAVE='5c1f33ff-1968-434b-9dc8-fb11947c39ca';
-/* ===== FIREBASE: cole aqui os dados do seu app web (Console do Firebase > Configurações do projeto > Seus apps) =====
-   Enquanto apiKey estiver vazio, o site roda em modo local (dados só neste navegador). */
-const FIREBASE_CONFIG={apiKey:'',authDomain:'',projectId:'',storageBucket:'',messagingSenderId:'',appId:''};
-const CLOUD=!!FIREBASE_CONFIG.apiKey;
+/* ===== SUPABASE: cole aqui a URL e a chave anônima (Supabase > Project Settings > API > Project URL e "anon public")
+   A chave anônima é pública e pode ficar no site: quem protege os dados são as regras do arquivo minefood-supabase.sql.
+   NUNCA cole aqui a chave "service_role". Enquanto os campos estiverem vazios, o site roda em modo local (dados só neste navegador). */
+const SUPABASE_URL='';
+const SUPABASE_ANON_KEY='';
+const CLOUD=!!(SUPABASE_URL&&SUPABASE_ANON_KEY);
 let BOOTED=false,NEEDS_SETUP=false;
 const CATS=['Italiana','Japonesa','Lanches','Churrasco','Vegetariana','Pizzaria','Bebidas e Sorvetes'];
 let DB,CF=null;
@@ -1537,6 +1537,7 @@ function entrar(){const t=S.lt,er=S.err,reg=S.reg&&t=='cli',T={cli:'Cliente',res
  ${er=='cred'?'<div class="banner e" role="alert">E-mail ou senha incorretos para esta área. Confira os dados e tente de novo.</div>':''}
  ${er=='erro'?'<div class="banner e" role="alert">Não foi possível concluir. Verifique a conexão e tente de novo.</div>':''}
  ${er=='existe'?'<div class="banner e" role="alert">Já existe uma conta com este e-mail. Entre ou use outro e-mail.</div>':''}
+ ${er=='confirmar'?'<div class="banner w" role="status">Conta criada! Enviamos um link de confirmação para o seu e-mail. Confirme e depois entre aqui.</div>':''}
  ${reg?`<div class="fld"><label for="lg-n">Nome</label><input id="lg-n" value="${esc(S.f.n||'')}" class="${er=='vazio'&&!S.f.n?'bad':''}" autocomplete="name">${er=='vazio'&&!S.f.n?'<span class="err">Informe seu nome.</span>':''}</div>`:''}
  <div class="fld"><label for="lg-e">E-mail</label><input id="lg-e" type="email" value="${esc(S.f.e||'')}" class="${er=='vazio'&&!S.f.e?'bad':''}" autocomplete="email">${er=='vazio'&&!S.f.e?'<span class="err">Informe seu e-mail.</span>':''}</div>
  <div class="fld"><label for="lg-p">Senha</label><input id="lg-p" type="password" class="${er=='vazio'||er=='curta'?'bad':''}" autocomplete="${reg?'new-password':'current-password'}">${er=='vazio'?'<span class="err">Informe a senha.</span>':''}${er=='curta'?'<span class="err">Use pelo menos 6 caracteres.</span>':''}</div>
@@ -1690,73 +1691,121 @@ function mens(r){const m=mst(r),c=pixCfg(),k=pixKey(c.chave),on=pixOk();
 
 </script>
 <script>
-/* ===== Camada Firebase (Auth + Firestore). Só roda se FIREBASE_CONFIG estiver preenchido ===== */
-let auth=null,fs=null,SEC=null,LOGIN_BUSY=false,AU=0,UNS=[],RT=null;
+/* ===== Camada Supabase (Auth + Banco + Realtime). Só roda se SUPABASE_URL e SUPABASE_ANON_KEY estiverem preenchidos ===== */
+let sb=null,SEC=null,LOGIN_BUSY=false,AU=0,UNS=[],RT=null,PEND=0,SV=0,ACT=[],PW_REC=/type=recovery/.test(location.hash);
+const QUEUE=new Set(),DEB={},TABLES=['users','rests','menu','orders','notifs','cfg'];
 const RAW={rests:[],menu:[]},LAST={users:{},rests:{},menu:{},orders:{},notifs:{},cfg:{}};
 const sj=o=>JSON.stringify(o,(k,v)=>v&&typeof v=='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a<b?-1:a>b?1:0)):v);
 const idx=a=>Object.fromEntries(a.map(x=>[x.id,sj(x)]));
 const clean=d=>JSON.parse(JSON.stringify(d));
-function schedRender(local){if(!BOOTED||local)return;clearTimeout(RT);RT=setTimeout(()=>{const a=document.activeElement;if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName))return;if($('#ov')&&$('#ov').innerHTML)return;render()},200)}
+function schedRender(){if(!BOOTED)return;clearTimeout(RT);RT=setTimeout(()=>{const a=document.activeElement;if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName))return;if($('#ov')&&$('#ov').innerHTML)return;render()},200)}
 function rebuild(){DB.rests=RAW.rests.map(r=>({...r,menu:RAW.menu.filter(i=>i.rid==r.id).sort((a,b)=>(a.ord||0)-(b.ord||0))}));LAST.rests=idx(RAW.rests);LAST.menu=idx(RAW.menu)}
+/* Lê a tabela inteira (o próprio banco filtra o que cada usuário pode ver) */
+async function fetchAll(t){const N=1000;let out=[];for(let f=0;;f+=N){const{data,error}=await sb.from(t).select('id,data').order('id').range(f,f+N-1);if(error)throw error;out=out.concat(data||[]);if(!data||data.length<N)break}return out}
+function apply(t,rows){const a=rows.map(r=>r.data);
+ if(t=='rests'||t=='menu'){RAW[t]=a;rebuild();return}
+ if(t=='cfg'){const m=rows.find(r=>r.id=='main');DB.cfg=m?m.data:{};LAST.cfg=m?{main:sj(DB.cfg)}:{};return}
+ DB[t]=a;LAST[t]=idx(a)}
+const snap=t=>sj(t=='rests'||t=='menu'?RAW[t]:t=='cfg'?DB.cfg:DB[t]);
+async function refresh(t){if(PEND){QUEUE.add(t);return}const v=SV,b=snap(t);let rows;
+ try{rows=await fetchAll(t)}catch(e){console.error(t,e);return}
+ if(v!==SV||PEND){QUEUE.add(t);return}
+ apply(t,rows);if(snap(t)!==b)schedRender()}
+function later(t){clearTimeout(DEB[t]);DEB[t]=setTimeout(()=>refresh(t),150)}
+function listen(name,tables){const ch=sb.channel(name+'-'+uid());tables.forEach(t=>ch.on('postgres_changes',{event:'*',schema:'public',table:t},()=>later(t)));ch.subscribe();return()=>sb.removeChannel(ch)}
+function done(){if(--PEND>0)return;PEND=0;const q=[...QUEUE];QUEUE.clear();q.forEach(later)}
+async function runOps(c,ins,upd,del){const ok=r=>{if(r.error)throw r.error};
+ if(ins.length)ok(c=='users'?await sb.from(c).upsert(ins):await sb.from(c).insert(ins));
+ for(const r of upd)ok(await sb.from(c).update({data:r.data}).eq('id',r.id));
+ if(del.length)ok(await sb.from(c).delete().in('id',del))}
 function cloudSave(){
  DB.rests.forEach(r=>{let mx=Math.max(0,...r.menu.map(i=>i.ord||0));r.menu.forEach(i=>{if(!i.ord)i.ord=++mx})});
+ RAW.rests=DB.rests.map(r=>{const{menu,...d}=r;return clean(d)});RAW.menu=DB.rests.flatMap(r=>r.menu.map(i=>clean({...i,rid:r.id})));
  const C={users:()=>DB.users.map(u=>[u.id,u]),rests:()=>DB.rests.map(r=>{const{menu,...d}=r;return[r.id,d]}),menu:()=>DB.rests.flatMap(r=>r.menu.map(i=>[i.id,{...i,rid:r.id}])),orders:()=>DB.orders.map(o=>[o.id,o]),notifs:()=>DB.notifs.map(n=>[n.id,n]),cfg:()=>Object.keys(DB.cfg).length?[['main',DB.cfg]]:[]};
- const ops=[];
- for(const c in C){const cur=C[c](),ids=new Set(cur.map(x=>x[0])),last=LAST[c]=LAST[c]||{};
-  for(const[id,d]of cur){const v=clean(d),j=sj(v);if(last[id]!==j){ops.push(['set',c,id,v]);last[id]=j}}
-  for(const id in last)if(!ids.has(id)){ops.push(['del',c,id]);delete last[id]}}
- for(let i=0;i<ops.length;i+=400){const b=fs.batch();ops.slice(i,i+400).forEach(([t,c,id,v])=>{const ref=fs.collection(c).doc(id);t=='set'?b.set(ref,v):b.delete(ref)});
-  b.commit().catch(e=>{console.error('save',e);toast('Não foi possível salvar. Verifique a conexão e as permissões.')})}
+ SV++;
+ for(const c in C){const cur=C[c](),ids=new Set(cur.map(x=>x[0])),last=LAST[c]=LAST[c]||{},ins=[],upd=[],del=[];
+  for(const[id,d]of cur){const v=clean(d),j=sj(v);if(last[id]===undefined)ins.push({id,data:v});else if(last[id]!==j)upd.push({id,data:v});last[id]=j}
+  for(const id in last)if(!ids.has(id)){del.push(id);delete last[id]}
+  if(!ins.length&&!upd.length&&!del.length)continue;
+  PEND++;runOps(c,ins,upd,del).catch(e=>{console.error('save',c,e);QUEUE.add(c);toast('Não foi possível salvar. Verifique a conexão e as permissões.')}).finally(done)}
  return true}
-function stopRole(){UNS.forEach(f=>f());UNS=[];DB.orders=[];LAST.orders={};DB.notifs=[];LAST.notifs={};DB.cfg={};LAST.cfg={}}
-function startRole(u){const uid=u.id,add=f=>UNS.push(f),er=n=>e=>console.error(n,e);
- const col=(c,q)=>add(q.onSnapshot(s=>{DB[c]=s.docs.map(d=>d.data());LAST[c]=idx(DB[c]);schedRender(s.metadata.hasPendingWrites)},er(c)));
- const cfg=()=>add(fs.doc('cfg/main').onSnapshot(s=>{DB.cfg=s.exists?s.data():{};LAST.cfg={main:sj(DB.cfg)};schedRender(s.metadata.hasPendingWrites)},er('cfg')));
- const eu=()=>add(fs.doc('users/'+uid).onSnapshot(s=>{if(s.exists){DB.users=[s.data()];LAST.users={[uid]:sj(DB.users[0])};schedRender(s.metadata.hasPendingWrites)}},er('users')));
- if(u.role=='admin'){col('users',fs.collection('users'));col('orders',fs.collection('orders'));col('notifs',fs.collection('notifs'));cfg()}
- else if(u.role=='rest'){eu();col('notifs',fs.collection('notifs').where('owner','==',uid));cfg()}
- else{eu();col('orders',fs.collection('orders').where('cli','==',uid))}}
-async function applyUser(fu){const my=++AU;stopRole();DB.session=null;DB.users=[];LAST.users={};if(!fu)return;
- const d=await fs.doc('users/'+fu.uid).get();if(my!=AU)return;
- if(!d.exists){await auth.signOut();return}
- const u=d.data();DB.users=[u];LAST.users={[u.id]:sj(u)};DB.session=u.id;startRole(u)}
-function watchPub(c){return new Promise((res,rej)=>{let first=true;fs.collection(c).onSnapshot(s=>{RAW[c]=s.docs.map(d=>d.data());rebuild();if(first){first=false;res()}else schedRender(s.metadata.hasPendingWrites)},e=>{console.error(c,e);if(first){first=false;rej(e)}})})}
+function stopRole(){UNS.forEach(f=>f());UNS=[];ACT=[];DB.orders=[];LAST.orders={};DB.notifs=[];LAST.notifs={};DB.cfg={};LAST.cfg={}}
+async function startRole(u){const t=u.role=='admin'?['users','orders','notifs','cfg']:u.role=='rest'?['users','notifs','cfg']:['users','orders'];
+ ACT=t;UNS.push(listen('role',t));
+ await Promise.all(t.map(async c=>{try{const rows=await fetchAll(c);if(c=='users'&&!rows.length)return;apply(c,rows)}catch(e){console.error(c,e)}}))}
+async function applyUser(su){const my=++AU;stopRole();DB.session=null;DB.users=[];LAST.users={};if(!su)return;
+ const{data,error}=await sb.from('users').select('data').eq('id',su.id).maybeSingle();if(my!=AU)return;
+ if(error){console.error('users',error);return}
+ if(!data){await sb.auth.signOut();return}
+ const u=data.data;DB.users=[u];LAST.users={[u.id]:sj(u)};DB.session=u.id;await startRole(u)}
 async function cloudBoot(){
- if(typeof firebase=='undefined')throw new Error('SDK do Firebase não carregou');
- firebase.initializeApp(FIREBASE_CONFIG);auth=firebase.auth();fs=firebase.firestore();auth.languageCode='pt-BR';
+ if(!window.supabase||!window.supabase.createClient)throw new Error('SDK do Supabase não carregou');
+ sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'minefood-auth'}});
+ sb.auth.onAuthStateChange((ev,s)=>{
+  if(ev=='PASSWORD_RECOVERY'){PW_REC=true;if(BOOTED)setTimeout(novaSenha,0);return}
+  if(ev!='SIGNED_IN'&&ev!='SIGNED_OUT')return;
+  if(LOGIN_BUSY||!BOOTED)return;
+  const id=s&&s.user?s.user.id:null;if(id==DB.session)return;
+  setTimeout(async()=>{await applyUser(s&&s.user);go(location.hash.slice(1))},0)});
  DB={session:null,cfg:{},orders:[],notifs:[],users:[],rests:[]};
- try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){}
- try{const s=await fs.doc('cfg/setup').get();NEEDS_SETUP=!s.exists}catch(e){NEEDS_SETUP=false}
- await Promise.all([watchPub('rests'),watchPub('menu')]);
- const u0=await new Promise(res=>{const un=auth.onAuthStateChanged(u=>{un();res(u)})});
- await applyUser(u0);
- auth.onAuthStateChanged(async u=>{if(LOGIN_BUSY||!BOOTED)return;await applyUser(u);go(location.hash.slice(1))})}
+ const{data:{session}}=await sb.auth.getSession();
+ if(/access_token=|refresh_token=|error_description=|type=recovery/.test(location.hash))history.replaceState(null,'',location.pathname+location.search);
+ const st=await sb.from('cfg').select('id').eq('id','setup').maybeSingle();
+ if(st.error){console.error(st.error);throw new Error('Tabelas não encontradas. Rode o arquivo SQL no Supabase.')}
+ NEEDS_SETUP=!st.data;
+ const[r,m]=await Promise.all([fetchAll('rests'),fetchAll('menu')]);apply('rests',r);apply('menu',m);
+ listen('pub',['rests','menu']);
+ addEventListener('visibilitychange',()=>{if(document.visibilityState=='visible')['rests','menu',...ACT].forEach(later)});
+ await applyUser(session&&session.user)}
+const authCode=x=>String((x&&(x.code||x.error_code))||'');
 async function cloudLogin(email,pw,role){LOGIN_BUSY=true;
- try{const c=await auth.signInWithEmailAndPassword(String(email).trim().toLowerCase(),pw),d=await fs.doc('users/'+c.user.uid).get();
-  if(!d.exists||d.data().role!=role){await auth.signOut();await applyUser(null);return null}
-  await applyUser(c.user);return me()}
- catch(x){if(x&&x.code=='auth/network-request-failed')toast('Sem conexão com a internet.');else if(x&&x.code=='auth/too-many-requests')toast('Muitas tentativas. Aguarde um pouco e tente de novo.');return null}
+ try{const{data,error}=await sb.auth.signInWithPassword({email:String(email).trim().toLowerCase(),password:pw});
+  if(error){const k=authCode(error),m=String(error.message||'');
+   if(k=='email_not_confirmed'||/not confirmed/i.test(m))toast('Confirme seu e-mail pelo link que enviamos antes de entrar.');
+   else if(error.status==429||/rate limit/i.test(m))toast('Muitas tentativas. Aguarde um pouco e tente de novo.');
+   else if(/fetch|network/i.test(m))toast('Sem conexão com a internet.');
+   return null}
+  const{data:d}=await sb.from('users').select('data').eq('id',data.user.id).maybeSingle();
+  if(!d||d.data.role!=role){await sb.auth.signOut();await applyUser(null);return null}
+  await applyUser(data.user);return me()}
+ catch(x){console.error(x);toast('Sem conexão com a internet.');return null}
  finally{LOGIN_BUSY=false}}
-function cloudLogout(){auth.signOut().then(()=>{S.cart={};nav('home')})}
+async function cloudLogout(){LOGIN_BUSY=true;try{await sb.auth.signOut()}catch(e){console.error(e)}await applyUser(null);LOGIN_BUSY=false;S.cart={};nav('home')}
 async function registrarCliente(n,e,p){
  if(!CLOUD){if(DB.users.some(u=>u.email==e.toLowerCase()))return'existe';DB.users.push({id:'u'+uid(),role:'cli',nome:n,email:e.toLowerCase(),h:await sha(p),favs:[]});save();return''}
  LOGIN_BUSY=true;
- try{const c=await auth.createUserWithEmailAndPassword(e.toLowerCase(),p),id=c.user.uid;await fs.doc('users/'+id).set({id,role:'cli',nome:n,email:e.toLowerCase(),favs:[]});return''}
- catch(x){const k=x&&x.code;return k=='auth/email-already-in-use'?'existe':k=='auth/weak-password'?'curta':'erro'}
+ try{const{data,error}=await sb.auth.signUp({email:e.toLowerCase(),password:p,options:{data:{nome:n},emailRedirectTo:location.href.split('#')[0]}});
+  if(error){const k=authCode(error),m=String(error.message||'');return k=='user_already_exists'||k=='email_exists'||/already/i.test(m)?'existe':k=='weak_password'||/password/i.test(m)?'curta':'erro'}
+  if(data.user&&Array.isArray(data.user.identities)&&!data.user.identities.length)return'existe';
+  if(!data.session){S.reg=false;return'confirmar'}
+  return''}
+ catch(x){console.error(x);return'erro'}
  finally{LOGIN_BUSY=false}}
-async function criarAuthRest(e,s){SEC=SEC||firebase.initializeApp(FIREBASE_CONFIG,'sec');const a=SEC.auth(),c=await a.createUserWithEmailAndPassword(e,s),id=c.user.uid;await a.signOut();return id}
-const msgAuth=x=>{const k=x&&x.code;return k=='auth/email-already-in-use'?'Já existe uma conta com este e-mail.':k=='auth/invalid-email'?'Informe um e-mail válido.':k=='auth/weak-password'?'A senha precisa ter pelo menos 6 caracteres.':k=='auth/network-request-failed'?'Sem conexão com a internet.':'Não foi possível criar o acesso do restaurante.'};
+async function criarAuthRest(e,s){SEC=SEC||window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storageKey:'minefood-sec'}});
+ const{data,error}=await SEC.auth.signUp({email:e,password:s});if(error)throw error;
+ if(!data.user||(Array.isArray(data.user.identities)&&!data.user.identities.length))throw{code:'user_already_exists'};
+ if(data.session)await SEC.auth.signOut({scope:'local'});
+ return data.user.id}
+const msgAuth=x=>{const k=authCode(x),m=String((x&&x.message)||'');return k=='user_already_exists'||k=='email_exists'||/already/i.test(m)?'Já existe uma conta com este e-mail.':k=='email_address_invalid'||/invalid.*email|email.*invalid/i.test(m)?'Informe um e-mail válido.':k=='weak_password'?'A senha precisa ter pelo menos 6 caracteres.':k=='over_email_send_rate_limit'||/rate limit/i.test(m)?'Limite de cadastros atingido no momento. Tente de novo mais tarde.':/fetch|network/i.test(m)?'Sem conexão com a internet.':'Não foi possível criar o acesso do restaurante.'};
 function esqueci(){if(!CLOUD)return toast('A recuperação por e-mail exige o banco de dados online. Peça ao administrador para redefinir.');
  const e=($('#lg-e').value||'').trim();if(!/^\S+@\S+\.\S+$/.test(e))return toast('Digite seu e-mail no campo acima e toque de novo.');
- auth.sendPasswordResetEmail(e).then(()=>toast('Se o e-mail estiver cadastrado, enviamos o link para criar uma nova senha.'),()=>toast('Não foi possível enviar agora. Tente de novo em instantes.'))}
+ sb.auth.resetPasswordForEmail(e.toLowerCase(),{redirectTo:location.href.split('#')[0]}).then(({error})=>error?toast('Não foi possível enviar agora. Tente de novo em instantes.'):toast('Se o e-mail estiver cadastrado, enviamos o link para criar uma nova senha.'),()=>toast('Não foi possível enviar agora. Tente de novo em instantes.'))}
+function novaSenha(){PW_REC=false;modal(`<h2>Criar nova senha</h2><form onsubmit="salvarNovaSenha();return false" novalidate><div class="fld"><label for="ns-p">Nova senha (mín. 6)</label><input id="ns-p" type="password" autocomplete="new-password"></div><div class="acts" style="justify-content:flex-end"><button type="button" class="btn t" onclick="fechar()">Agora não</button><button class="btn">Salvar senha</button></div></form>`)}
+async function salvarNovaSenha(){const p=$('#ns-p').value;if(p.length<6)return toast('A senha precisa ter pelo menos 6 caracteres.');
+ const{error}=await sb.auth.updateUser({password:p});if(error)return toast('Não foi possível salvar a nova senha. Peça um novo link.');fechar();toast('Senha alterada!')}
 function setupView(){return `<div class="wrap"><form class="login" onsubmit="enviarSetup();return false" novalidate><h2>Primeiro acesso</h2><p class="meta">Crie a conta do administrador do Minefood. Esta tela só aparece uma vez.</p><div class="fld"><label for="st-n">Nome</label><input id="st-n" value="Administrador"></div><div class="fld"><label for="st-e">E-mail</label><input id="st-e" type="email" autocomplete="email"></div><div class="fld"><label for="st-p">Senha (mín. 6)</label><input id="st-p" type="password" autocomplete="new-password"></div><button class="btn" style="width:100%">Criar administrador</button></form></div>`}
 async function enviarSetup(){const n=$('#st-n').value.trim()||'Administrador',e=$('#st-e').value.trim().toLowerCase(),p=$('#st-p').value;
  if(!/^\S+@\S+\.\S+$/.test(e)||p.length<6)return toast('Informe um e-mail válido e uma senha de pelo menos 6 caracteres.');
  LOGIN_BUSY=true;
- try{const c=await auth.createUserWithEmailAndPassword(e,p),id=c.user.uid,b=fs.batch();
-  b.set(fs.doc('users/'+id),{id,role:'admin',nome:n,email:e});b.set(fs.doc('cfg/setup'),{done:true});b.set(fs.doc('cfg/main'),{pix:PIX_CHAVE,pixNome:'Minefood',pixCidade:'Belo Horizonte'});
-  await b.commit();NEEDS_SETUP=false;await applyUser(c.user);toast('Administrador criado!');nav('painel')}
- catch(x){console.error(x);toast(x&&x.code=='auth/email-already-in-use'?'Este e-mail já tem conta. Use outro ou apague-o no console do Firebase.':'Não foi possível concluir o primeiro acesso. Confira as regras do Firestore.')}
+ try{let{data,error}=await sb.auth.signUp({email:e,password:p,options:{data:{nome:n}}});
+  const existe=error?/already|exists/i.test(authCode(error)+' '+error.message):!!(data.user&&Array.isArray(data.user.identities)&&!data.user.identities.length);
+  if(error&&!existe)throw error;
+  if(existe||!data.session){const r=await sb.auth.signInWithPassword({email:e,password:p});
+   if(r.error){const k=authCode(r.error);return toast(k=='email_not_confirmed'||/not confirmed/i.test(r.error.message)?'Confirme o e-mail pelo link enviado (ou desative "Confirm email" no Supabase) e tente de novo.':existe?'Este e-mail já tem conta com outra senha. Use outro ou apague-o no painel do Supabase.':'Não foi possível entrar com esta conta.')}
+   data=r.data}
+  const{error:er}=await sb.rpc('mf_setup',{p_nome:n,p_pix:PIX_CHAVE});if(er)throw er;
+  NEEDS_SETUP=false;await applyUser(data.user);toast('Administrador criado!');nav('painel')}
+ catch(x){console.error(x);toast('Não foi possível concluir o primeiro acesso. Confira se o arquivo SQL foi executado no Supabase.')}
  finally{LOGIN_BUSY=false}}
 </script>
 <script>
@@ -1775,7 +1824,7 @@ function render(){const v=S.v,f=VIEWS[v]||(DB.rests.some(r=>r.id==v)?rest:home);
  const t={home:'Minefood',busca:'Buscar · Minefood',entrar:'Entrar · Minefood'}[v];document.title=t||'Minefood'}
 addEventListener('hashchange',()=>go(location.hash.slice(1)));
 $('#app').innerHTML='<div class="wrap"><p class="meta" style="padding:3rem 0;text-align:center">Carregando…</p></div>';
-(CLOUD?cloudBoot():seed()).then(()=>{BOOTED=true;go(location.hash.slice(1))},e=>{console.error(e);$('#app').innerHTML='<div class="wrap"><div class="emp" style="margin-top:2rem"><div class="big">⚠️</div><h2>Não foi possível conectar</h2><p class="meta">Verifique sua conexão e a configuração do Firebase.</p><button class="btn" onclick="location.reload()">Tentar de novo</button></div></div>'});
+(CLOUD?cloudBoot():seed()).then(()=>{BOOTED=true;go(location.hash.slice(1));if(CLOUD&&PW_REC&&DB.session)novaSenha()},e=>{console.error(e);$('#app').innerHTML='<div class="wrap"><div class="emp" style="margin-top:2rem"><div class="big">⚠️</div><h2>Não foi possível conectar</h2><p class="meta">Verifique sua conexão, a URL e a chave anônima do Supabase e se o arquivo minefood-supabase.sql foi executado.</p><button class="btn" onclick="location.reload()">Tentar de novo</button></div></div>'});
 
 </script>
 </body>
