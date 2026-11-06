@@ -63,7 +63,7 @@ select{background:var(--sf);border:1.5px solid var(--ln);border-radius:10px;padd
 .kp div{background:var(--adb);border-radius:16px;padding:1rem}.kp b{display:block;font:800 1.8rem 'Bricolage Grotesque',sans-serif}
 .tw{overflow-x:auto;background:var(--sf);border:1px solid var(--ln);border-radius:16px}
 table{border-collapse:collapse;width:100%;min-width:620px}th,td{padding:.7rem .9rem;text-align:left;border-bottom:1px solid var(--ln)}th{font-size:.85rem;color:var(--mu)}
-.acts{display:flex;gap:.3rem;flex-wrap:wrap}.acts button{border:1px solid var(--ln);background:none;border-radius:8px;padding:.3rem .6rem;min-height:36px}
+.acts{display:flex;gap:.3rem;flex-wrap:wrap}.acts button:not(.btn){border:1px solid var(--ln);background:none;border-radius:8px;padding:.3rem .6rem;min-height:36px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem}
 .qr{display:grid;place-items:center;margin:1rem auto}.qr svg{max-width:100%;height:auto}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:grid;place-items:center;z-index:20;padding:1rem}
@@ -71,7 +71,8 @@ table{border-collapse:collapse;width:100%;min-width:620px}th,td{padding:.7rem .9
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:.7rem 1.2rem;border-radius:12px;z-index:30}
 .bn{display:none}
 .demo{font-size:.85rem;color:var(--mu)}
-@media(max-width:760px){.top nav .hide{display:none}.two{grid-template-columns:1fr}
+@media(max-width:760px){.top nav .hide{display:none}
+@media(max-width:480px){.top .wrap{gap:.4rem}.top nav{gap:0}.top nav button{padding:.45rem .5rem;font-size:.9rem;white-space:nowrap}.top .logo{font-size:1.2rem}}.two{grid-template-columns:1fr}
 .adm{grid-template-columns:1fr;padding-bottom:64px}.adm aside{display:none}
 .bn{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--adb);border-top:1px solid var(--ln);z-index:10;padding-bottom:env(safe-area-inset-bottom,0px)}
 .bn button{flex:1;background:none;border:0;padding:.6rem .2rem;font-size:.72rem;min-height:56px}.bn .on{font-weight:700;color:var(--ad)}}
@@ -1398,14 +1399,21 @@ var QR=req('index');window.MFQR=function(t){var q=new QR(-1,0);q.addData(t);q.ma
 <script>
 /* Minefood – dados, regras e utilitários.
    Com o Supabase configurado, os dados ficam online; sem ele, ficam só no localStorage deste navegador. */
-const ADMIN_EMAIL='admin@minefood.com',ADMIN_H='5a5ad199dd113371a7c07bf4b01a7db335ad4f6be6d8cc6aa2ec30cdd0d02e9d';
+const ADMIN_EMAIL='adm@minefood.com',ADMIN_H='bb44b931b8eb2186d411598a22bb3b12278aef3ecdfa6fe198ce2374e9ac252e';
 const KEY='minefood_v2',PIX_CHAVE='5c1f33ff-1968-434b-9dc8-fb11947c39ca';
 /* ===== SUPABASE: cole aqui a URL e a chave anônima (Supabase > Project Settings > API > Project URL e "anon public")
    A chave anônima é pública e pode ficar no site: quem protege os dados são as regras do arquivo minefood-supabase.sql.
    NUNCA cole aqui a chave "service_role". Enquanto os campos estiverem vazios, o site roda em modo local (dados só neste navegador). */
-const SUPABASE_URL='https://lancheriasminefood.github.io/minefood.app/';
-const SUPABASE_ANON_KEY='sb_publishable_zBktJduLwgEdOJe3dH5jLA_1QHiE6JZ';
-const CLOUD=!!(SUPABASE_URL&&SUPABASE_ANON_KEY);
+const SUPABASE_URL='';
+const SUPABASE_ANON_KEY='';
+/* Corrige erros comuns ao colar: espaços, barra no fim, "/rest/v1", link do painel ou só o código do projeto */
+const SB_KEY=String(SUPABASE_ANON_KEY||'').replace(/^\s*(Bearer\s+)?/i,'').replace(/["'\s]/g,'');
+const SB_URL=(u=>{u=String(u||'').trim().replace(/["'\s]/g,'');if(!u)return'';
+ const p=u.match(/supabase\.com\/dashboard\/project\/([a-z0-9]{15,30})/i);if(p)return'https://'+p[1].toLowerCase()+'.supabase.co';
+ if(/^[a-z0-9]{15,30}$/i.test(u))return'https://'+u.toLowerCase()+'.supabase.co';
+ if(!/^https?:\/\//i.test(u))u='https://'+u;
+ return u.replace(/\/(rest|auth)\/v1.*$/i,'').replace(/\/+$/,'')})(SUPABASE_URL);
+const CLOUD=!!(SB_URL&&SB_KEY);
 let BOOTED=false,NEEDS_SETUP=false;
 const CATS=['Italiana','Japonesa','Lanches','Churrasco','Vegetariana','Pizzaria','Bebidas e Sorvetes'];
 let DB,CF=null;
@@ -1738,9 +1746,37 @@ async function applyUser(su){const my=++AU;stopRole();DB.session=null;DB.users=[
  if(error){console.error('users',error);return}
  if(!data){await sb.auth.signOut();return}
  const u=data.data;DB.users=[u];LAST.users={[u.id]:sj(u)};DB.session=u.id;await startRole(u)}
+/* ===== Diagnóstico de conexão: mostra na tela o motivo exato do erro ===== */
+function cErr(k,x){const e=new Error(k);e.kind=k;e.det=x?String(x.message||x.msg||x.hint||x.code||x):'';return e}
+function cKind(e){const m=String((e&&(e.message||e.msg))||'')+' '+String((e&&e.code)||''),st=e&&e.status;
+ if(st==401||/api key|apikey|jwt|unauthori[sz]ed|no api key/i.test(m))return'key';
+ if(/PGRST20[25]|42P01|schema cache|does not exist|relation/i.test(m)||st==404)return'sql';
+ if(/42501|permission denied/i.test(m)||st==403)return'perm';
+ if(/fetch|network|load failed|cors/i.test(m)||st===0)return'net';
+ return'outro'}
+async function cPing(){let r;
+ try{r=await fetch(SB_URL+'/auth/v1/settings',{headers:{apikey:SB_KEY}})}catch(x){if(navigator.onLine===false)throw cErr('offline',x);return}
+ if(r.status==401||r.status==403)throw cErr('key',{message:'HTTP '+r.status});
+ if(r.status==404)throw cErr('url',{message:'HTTP 404'});
+ if(r.status>=500)throw cErr('pausado',{message:'HTTP '+r.status})}
+function cMsg(e){const u=esc(SB_URL);
+ const M={
+  sdk:['Não foi possível baixar o Supabase','O site precisa baixar um arquivo de <b>cdn.jsdelivr.net</b>. Verifique a internet e desative bloqueadores de anúncio para este site.'],
+  offline:['Sem internet','Este aparelho está sem conexão. Conecte-se e tente de novo.'],
+  url:['A URL do Supabase está errada','Confira a <b>linha 1406</b> do index.html. Ela deve ser parecida com <b>https://abcdefgh.supabase.co</b> (Supabase → Project Settings → API → Project URL).<br>Hoje o site está tentando: <b>'+u+'</b>'],
+  net:['O site não encontrou o seu projeto do Supabase','O endereço <b>'+u+'</b> não respondeu. Confira a URL na <b>linha 1406</b> e veja no painel do Supabase se o projeto não está <b>pausado</b> (projetos grátis pausam depois de alguns dias sem uso: clique em <b>Restore project</b>).'],
+  pausado:['O projeto do Supabase não está respondendo','Abra o painel do Supabase. Se o projeto estiver <b>pausado</b>, clique em <b>Restore project</b> e espere alguns minutos.'],
+  key:['A chave anônima não foi aceita','Confira a <b>linha 1407</b> do index.html. Copie de novo a chave <b>anon public</b> (ou <b>Publishable key</b>) em Supabase → Project Settings → API. Ela precisa ser do <b>mesmo projeto</b> da URL da linha 1406.'],
+  sql:['As tabelas não foram criadas','A conexão funcionou, mas falta rodar o arquivo <b>minefood-supabase.sql</b>. No Supabase, abra <b>SQL Editor</b>, cole o arquivo inteiro e clique em <b>Run</b>. Deve aparecer "Success".'],
+  perm:['Faltam permissões no banco','A conexão funcionou, mas o banco recusou o acesso. Rode o arquivo <b>minefood-supabase.sql</b> inteiro de novo no SQL Editor do Supabase.'],
+  outro:['Não foi possível conectar','Algo deu errado ao falar com o Supabase. Confira a URL (linha 1406), a chave anônima (linha 1407) e se o arquivo minefood-supabase.sql foi executado.']};
+ const k=e&&e.kind&&M[e.kind]?e.kind:(e&&e.status!==undefined||e&&e.code?cKind(e):'outro'),t=M[k]||M.outro;
+ const d=e&&(e.det||e.message||e.code);
+ return '<div class="wrap"><div class="emp" style="margin-top:2rem"><div class="big">⚠️</div><h2>'+t[0]+'</h2><p class="meta" style="max-width:34rem;margin:0 auto 1rem">'+t[1]+'</p>'+(d&&d!=k?'<p class="meta" style="font-size:.75rem;opacity:.7">Detalhe técnico: '+esc(d)+'</p>':'')+'<button class="btn" onclick="location.reload()">Tentar de novo</button></div></div>'}
 async function cloudBoot(){
- if(!window.supabase||!window.supabase.createClient)throw new Error('SDK do Supabase não carregou');
- sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'minefood-auth'}});
+ if(!window.supabase||!window.supabase.createClient)throw cErr('sdk');
+ try{sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'minefood-auth'}})}catch(x){throw cErr('url',x)}
+ await cPing();
  sb.auth.onAuthStateChange((ev,s)=>{
   if(ev=='PASSWORD_RECOVERY'){PW_REC=true;if(BOOTED)setTimeout(novaSenha,0);return}
   if(ev!='SIGNED_IN'&&ev!='SIGNED_OUT')return;
@@ -1751,7 +1787,7 @@ async function cloudBoot(){
  const{data:{session}}=await sb.auth.getSession();
  if(/access_token=|refresh_token=|error_description=|type=recovery/.test(location.hash))history.replaceState(null,'',location.pathname+location.search);
  const st=await sb.from('cfg').select('id').eq('id','setup').maybeSingle();
- if(st.error){console.error(st.error);throw new Error('Tabelas não encontradas. Rode o arquivo SQL no Supabase.')}
+ if(st.error){console.error(st.error);throw cErr(cKind(st.error),st.error)}
  NEEDS_SETUP=!st.data;
  const[r,m]=await Promise.all([fetchAll('rests'),fetchAll('menu')]);apply('rests',r);apply('menu',m);
  listen('pub',['rests','menu']);
@@ -1781,7 +1817,7 @@ async function registrarCliente(n,e,p){
   return''}
  catch(x){console.error(x);return'erro'}
  finally{LOGIN_BUSY=false}}
-async function criarAuthRest(e,s){SEC=SEC||window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storageKey:'minefood-sec'}});
+async function criarAuthRest(e,s){SEC=SEC||window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storageKey:'minefood-sec'}});
  const{data,error}=await SEC.auth.signUp({email:e,password:s});if(error)throw error;
  if(!data.user||(Array.isArray(data.user.identities)&&!data.user.identities.length))throw{code:'user_already_exists'};
  if(data.session)await SEC.auth.signOut({scope:'local'});
@@ -1793,7 +1829,7 @@ function esqueci(){if(!CLOUD)return toast('A recuperação por e-mail exige o ba
 function novaSenha(){PW_REC=false;modal(`<h2>Criar nova senha</h2><form onsubmit="salvarNovaSenha();return false" novalidate><div class="fld"><label for="ns-p">Nova senha (mín. 6)</label><input id="ns-p" type="password" autocomplete="new-password"></div><div class="acts" style="justify-content:flex-end"><button type="button" class="btn t" onclick="fechar()">Agora não</button><button class="btn">Salvar senha</button></div></form>`)}
 async function salvarNovaSenha(){const p=$('#ns-p').value;if(p.length<6)return toast('A senha precisa ter pelo menos 6 caracteres.');
  const{error}=await sb.auth.updateUser({password:p});if(error)return toast('Não foi possível salvar a nova senha. Peça um novo link.');fechar();toast('Senha alterada!')}
-function setupView(){return `<div class="wrap"><form class="login" onsubmit="enviarSetup();return false" novalidate><h2>Primeiro acesso</h2><p class="meta">Crie a conta do administrador do Minefood. Esta tela só aparece uma vez.</p><div class="fld"><label for="st-n">Nome</label><input id="st-n" value="Administrador"></div><div class="fld"><label for="st-e">E-mail</label><input id="st-e" type="email" autocomplete="email"></div><div class="fld"><label for="st-p">Senha (mín. 6)</label><input id="st-p" type="password" autocomplete="new-password"></div><button class="btn" style="width:100%">Criar administrador</button></form></div>`}
+function setupView(){return `<div class="wrap"><form class="login" onsubmit="enviarSetup();return false" novalidate><h2>Primeiro acesso</h2><p class="meta">Crie a conta do administrador do Minefood. Esta tela só aparece uma vez.</p><div class="fld"><label for="st-n">Nome</label><input id="st-n" value="Administrador"></div><div class="fld"><label for="st-e">E-mail</label><input id="st-e" type="email" autocomplete="email" value="${ADMIN_EMAIL}"></div><div class="fld"><label for="st-p">Senha (mín. 6)</label><input id="st-p" type="password" autocomplete="new-password"></div><button class="btn" style="width:100%">Criar administrador</button></form></div>`}
 async function enviarSetup(){const n=$('#st-n').value.trim()||'Administrador',e=$('#st-e').value.trim().toLowerCase(),p=$('#st-p').value;
  if(!/^\S+@\S+\.\S+$/.test(e)||p.length<6)return toast('Informe um e-mail válido e uma senha de pelo menos 6 caracteres.');
  LOGIN_BUSY=true;
@@ -1824,7 +1860,7 @@ function render(){const v=S.v,f=VIEWS[v]||(DB.rests.some(r=>r.id==v)?rest:home);
  const t={home:'Minefood',busca:'Buscar · Minefood',entrar:'Entrar · Minefood'}[v];document.title=t||'Minefood'}
 addEventListener('hashchange',()=>go(location.hash.slice(1)));
 $('#app').innerHTML='<div class="wrap"><p class="meta" style="padding:3rem 0;text-align:center">Carregando…</p></div>';
-(CLOUD?cloudBoot():seed()).then(()=>{BOOTED=true;go(location.hash.slice(1));if(CLOUD&&PW_REC&&DB.session)novaSenha()},e=>{console.error(e);$('#app').innerHTML='<div class="wrap"><div class="emp" style="margin-top:2rem"><div class="big">⚠️</div><h2>Não foi possível conectar</h2><p class="meta">Verifique sua conexão, a URL e a chave anônima do Supabase e se o arquivo minefood-supabase.sql foi executado.</p><button class="btn" onclick="location.reload()">Tentar de novo</button></div></div>'});
+(CLOUD?cloudBoot():seed()).then(()=>{BOOTED=true;go(location.hash.slice(1));if(CLOUD&&PW_REC&&DB.session)novaSenha()},e=>{console.error(e);$('#app').innerHTML=CLOUD?cMsg(e):cMsg({kind:'outro'})});
 
 </script>
 </body>
