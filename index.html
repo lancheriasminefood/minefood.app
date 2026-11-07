@@ -128,7 +128,7 @@ a.btn{display:inline-block;text-decoration:none;text-align:center}
 .pf input{width:84px;border:1.5px solid var(--ln);background:var(--bg);border-radius:8px;padding:.3rem .6rem;min-height:34px;text-align:center}
 .pf input:focus{border-color:var(--pr);outline:0}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -1404,8 +1404,8 @@ const KEY='minefood_v2',PIX_CHAVE='5c1f33ff-1968-434b-9dc8-fb11947c39ca';
 /* ===== SUPABASE: cole aqui a URL e a chave anônima (Supabase > Project Settings > API > Project URL e "anon public")
    A chave anônima é pública e pode ficar no site: quem protege os dados são as regras do arquivo minefood-supabase.sql.
    NUNCA cole aqui a chave "service_role". Enquanto os campos estiverem vazios, o site roda em modo local (dados só neste navegador). */
-const SUPABASE_URL='';
-const SUPABASE_ANON_KEY='';
+const SUPABASE_URL='https://lancheriasminefood.github.io/minefood.app/';
+const SUPABASE_ANON_KEY='sb_publishable_zBktJduLwgEdOJe3dH5jLA_1QHiE6JZ';
 /* Corrige erros comuns ao colar: espaços, barra no fim, "/rest/v1", link do painel ou só o código do projeto */
 const SB_KEY=String(SUPABASE_ANON_KEY||'').replace(/^\s*(Bearer\s+)?/i,'').replace(/["'\s]/g,'');
 const SB_URL=(u=>{u=String(u||'').trim().replace(/["'\s]/g,'');if(!u)return'';
@@ -1706,7 +1706,7 @@ const RAW={rests:[],menu:[]},LAST={users:{},rests:{},menu:{},orders:{},notifs:{}
 const sj=o=>JSON.stringify(o,(k,v)=>v&&typeof v=='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a<b?-1:a>b?1:0)):v);
 const idx=a=>Object.fromEntries(a.map(x=>[x.id,sj(x)]));
 const clean=d=>JSON.parse(JSON.stringify(d));
-function schedRender(){if(!BOOTED)return;clearTimeout(RT);RT=setTimeout(()=>{const a=document.activeElement;if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName))return;if($('#ov')&&$('#ov').innerHTML)return;render()},200)}
+function schedRender(d){if(!BOOTED)return;clearTimeout(RT);RT=setTimeout(()=>{const a=document.activeElement;if((a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName))||($('#ov')&&$('#ov').innerHTML))return schedRender(1500);render()},d||200)}
 function rebuild(){DB.rests=RAW.rests.map(r=>({...r,menu:RAW.menu.filter(i=>i.rid==r.id).sort((a,b)=>(a.ord||0)-(b.ord||0))}));LAST.rests=idx(RAW.rests);LAST.menu=idx(RAW.menu)}
 /* Lê a tabela inteira (o próprio banco filtra o que cada usuário pode ver) */
 async function fetchAll(t){const N=1000;let out=[];for(let f=0;;f+=N){const{data,error}=await sb.from(t).select('id,data').order('id').range(f,f+N-1);if(error)throw error;out=out.concat(data||[]);if(!data||data.length<N)break}return out}
@@ -1720,7 +1720,12 @@ async function refresh(t){if(PEND){QUEUE.add(t);return}const v=SV,b=snap(t);let 
  if(v!==SV||PEND){QUEUE.add(t);return}
  apply(t,rows);if(snap(t)!==b)schedRender()}
 function later(t){clearTimeout(DEB[t]);DEB[t]=setTimeout(()=>refresh(t),150)}
-function listen(name,tables){const ch=sb.channel(name+'-'+uid());tables.forEach(t=>ch.on('postgres_changes',{event:'*',schema:'public',table:t},()=>later(t)));ch.subscribe();return()=>sb.removeChannel(ch)}
+/* Tempo real + reserva: se o tempo real falhar, o site busca as novidades sozinho a cada poucos segundos */
+const LIVE={};let TICK=0;
+function listen(name,tables){const k=name+'-'+uid(),ch=sb.channel(k);LIVE[k]=false;tables.forEach(t=>ch.on('postgres_changes',{event:'*',schema:'public',table:t},()=>later(t)));
+ ch.subscribe((st,err)=>{const ok=st=='SUBSCRIBED';if(ok&&LIVE[k]===false&&TICK)tables.forEach(later);LIVE[k]=ok;if(!ok)console.warn('Tempo real ('+name+'):',st,err||'')});
+ return()=>{delete LIVE[k];sb.removeChannel(ch)}}
+function poll(){if(!sb||document.visibilityState!='visible')return;TICK++;const live=Object.values(LIVE).every(Boolean);if(live&&TICK%6)return;['rests','menu',...ACT].forEach(later)}
 function done(){if(--PEND>0)return;PEND=0;const q=[...QUEUE];QUEUE.clear();q.forEach(later)}
 async function runOps(c,ins,upd,del){const ok=r=>{if(r.error)throw r.error};
  if(ins.length)ok(c=='users'?await sb.from(c).upsert(ins):await sb.from(c).insert(ins));
@@ -1792,6 +1797,7 @@ async function cloudBoot(){
  const[r,m]=await Promise.all([fetchAll('rests'),fetchAll('menu')]);apply('rests',r);apply('menu',m);
  listen('pub',['rests','menu']);
  addEventListener('visibilitychange',()=>{if(document.visibilityState=='visible')['rests','menu',...ACT].forEach(later)});
+ setInterval(poll,5000);
  await applyUser(session&&session.user)}
 const authCode=x=>String((x&&(x.code||x.error_code))||'');
 async function cloudLogin(email,pw,role){LOGIN_BUSY=true;
