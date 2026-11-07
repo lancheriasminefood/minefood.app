@@ -1403,8 +1403,7 @@ const ADMIN_EMAIL='adm@minefood.com',ADMIN_H='bb44b931b8eb2186d411598a22bb3b1227
 const KEY='minefood_v2',PIX_CHAVE='5c1f33ff-1968-434b-9dc8-fb11947c39ca';
 /* ===== SUPABASE: cole aqui a URL e a chave anônima (Supabase > Project Settings > API > Project URL e "anon public")
    A chave anônima é pública e pode ficar no site: quem protege os dados são as regras do arquivo minefood-supabase.sql.
-   NUNCA cole aqui a chave "service_role". Enquanto os campos estiverem vazios, o site roda em modo local (dados só neste navegador). */
-const SUPABASE_URL='https://lancheriasminefood.github.io/minefood.app/';
+  const SUPABASE_URL='https://lancheriasminefood.github.io/minefood.app/';
 const SUPABASE_ANON_KEY='sb_publishable_zBktJduLwgEdOJe3dH5jLA_1QHiE6JZ';
 /* Corrige erros comuns ao colar: espaços, barra no fim, "/rest/v1", link do painel ou só o código do projeto */
 const SB_KEY=String(SUPABASE_ANON_KEY||'').replace(/^\s*(Bearer\s+)?/i,'').replace(/["'\s]/g,'');
